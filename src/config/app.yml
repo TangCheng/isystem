@@ -1,0 +1,6 @@
+token: isystem_token
+subscribe:
+  iconfig_pub: tcp://127.0.0.1:3010
+scripts:
+  timezone: '/apps/etc/init.d/S72timezone'
+  lighttpd: '/apps/etc/init.d/S81lighttpd restart'
