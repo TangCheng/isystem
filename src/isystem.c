@@ -27,7 +27,15 @@ static void ipcam_isystem_before_impl(IpcamISystem *isystem)
 {
 	ipcam_base_app_register_notice_handler(IPCAM_BASE_APP(isystem), "set_datetime", IPCAM_ISYSTEM_EVENT_HANDLER_TYPE);
 	ipcam_base_app_register_notice_handler(IPCAM_BASE_APP(isystem), "set_network", IPCAM_ISYSTEM_EVENT_HANDLER_TYPE);
-    ipcam_base_app_add_timer(IPCAM_BASE_APP(isystem), "status_led_proc", "1", ipcam_isystem_status_led_proc);
+    const gchar *interval = ipcam_base_app_get_config(IPCAM_BASE_APP(isystem), "system_led:interval");
+    if (interval != NULL)
+    {
+        ipcam_base_app_add_timer(IPCAM_BASE_APP(isystem), "status_led_proc", interval, ipcam_isystem_status_led_proc);
+    }
+    else
+    {
+        ipcam_base_app_add_timer(IPCAM_BASE_APP(isystem), "status_led_proc", "1", ipcam_isystem_status_led_proc);
+    }
 }
 static void ipcam_isystem_in_loop_impl(IpcamISystem *isystem)
 {
@@ -36,18 +44,28 @@ static void ipcam_isystem_in_loop_impl(IpcamISystem *isystem)
 static void ipcam_isystem_status_led_proc(GObject *obj)
 {
     g_return_if_fail(IPCAM_IS_ISYSTEM(obj));
-    static guint32 value = 0x0;
+    static gboolean light_on = FALSE;
     void *pMem  = NULL;
-    pMem = memmap(0x201C0020, DEFAULT_MD_LEN);
-    if (value == 0x8)
+    const gchar *addr = ipcam_base_app_get_config(IPCAM_BASE_APP(obj), "system_led:address");
+    const gchar *val = NULL;
+
+    if (light_on)
     {
-        value = 0x0;
+        light_on = FALSE;
+        val = ipcam_base_app_get_config(IPCAM_BASE_APP(obj), "system_led:off");
     }
     else
     {
-        value = 0x8;
+        light_on = TRUE;
+        val = ipcam_base_app_get_config(IPCAM_BASE_APP(obj), "system_led:on");
     }
-    *(guint32*)pMem = value;
+    if (val != NULL && addr != NULL)
+    {
+        guint32 address = g_ascii_strtoull(addr, NULL, 16);
+        guint32 value = g_ascii_strtoull(val, NULL, 16);
+        pMem = memmap(address, DEFAULT_MD_LEN);
+        *(guint32*)pMem = value;
+    }
 }
 
 void ipcam_isystem_update_network_setting(IpcamISystem *isystem, JsonNode *body)

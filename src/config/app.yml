@@ -4,3 +4,8 @@ subscribe:
 scripts:
   timezone: '/apps/etc/init.d/S72timezone'
   lighttpd: '/apps/etc/init.d/S81lighttpd restart'
+system_led:
+  interval: 1
+  address: '0x201C0020'
+  on: '0x08'
+  off: '0x00'
