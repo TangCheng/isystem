@@ -6,7 +6,26 @@
 #include "utils/memmap.h"
 #include <json-glib/json-glib.h>
 
-G_DEFINE_TYPE(IpcamISystem, ipcam_isystem, IPCAM_BASE_APP_TYPE);
+typedef gint64 (*DELAYED_WORK_FUNC)(void *user_data);
+
+typedef struct _ISystemDelayedWork
+{
+	gboolean enabled;
+	gint64 end_time;
+	DELAYED_WORK_FUNC func;
+	gpointer user_data;
+} ISystemDelayedWork;
+
+typedef struct _IpcamISystemPrivate
+{
+	ISystemDelayedWork delayed_works[1];
+} IpcamISystemPrivate;
+
+#define NETWORK_DELAYED_WORK_ID	0
+
+#define ARRAY_SIZE(x)	   (sizeof(x) / sizeof(x[0]))
+
+G_DEFINE_TYPE_WITH_PRIVATE(IpcamISystem, ipcam_isystem, IPCAM_BASE_APP_TYPE);
 
 #define DEFAULT_MD_LEN 128
 
@@ -16,6 +35,17 @@ static void ipcam_isystem_status_led_proc(GObject *obj);
 
 static void ipcam_isystem_init(IpcamISystem *self)
 {
+	IpcamISystemPrivate *priv = ipcam_isystem_get_instance_private(self);
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(priv->delayed_works); i++)
+	{
+		ISystemDelayedWork *work = &priv->delayed_works[i];
+		work->enabled = FALSE;
+		work->end_time = g_get_monotonic_time();
+		work->func = NULL;
+		work->user_data = NULL;
+	}
 }
 static void ipcam_isystem_class_init(IpcamISystemClass *klass)
 {
@@ -39,6 +69,27 @@ static void ipcam_isystem_before_impl(IpcamISystem *isystem)
 }
 static void ipcam_isystem_in_loop_impl(IpcamISystem *isystem)
 {
+	IpcamISystemPrivate *priv = ipcam_isystem_get_instance_private(isystem);
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(priv->delayed_works); i++)
+	{
+		gint64 now;
+		ISystemDelayedWork *work = &priv->delayed_works[i];
+		if (!work->enabled)
+			continue;
+		now = g_get_monotonic_time();
+		if (now < work->end_time)
+			continue;
+		work->enabled = FALSE;
+		if (work->func) {
+			gint64 ret = work->func(work->user_data);
+			if (ret > 0) {
+				work->end_time = now + ret;
+				work->enabled = TRUE;
+			}
+		}
+	}
 }
 
 static void ipcam_isystem_status_led_proc(GObject *obj)
@@ -68,6 +119,47 @@ static void ipcam_isystem_status_led_proc(GObject *obj)
     }
 }
 
+static gint64 ipcam_isystem_apply_network_parameter(void *user_data)
+{
+	IpcamISystem *isystem = IPCAM_ISYSTEM(user_data);
+	const gchar *script;
+
+	script = ipcam_base_app_get_config(IPCAM_BASE_APP(isystem), "scripts:network");
+	if (script) {
+		FILE *fp;
+
+		fp = popen(script, "w");
+		if (fp == NULL)
+		{
+			perror("error exec network script:");
+		}
+		else
+		{
+			pclose(fp);
+		}
+	}
+
+	return 0;
+}
+
+static void ipcam_isystem_sched_delayed_work(IpcamISystem *isystem, guint work_id,
+                                             gint64 timeout_ms,
+                                             DELAYED_WORK_FUNC func,
+                                             gpointer user_data)
+{
+	IpcamISystemPrivate *priv = ipcam_isystem_get_instance_private(isystem);
+	ISystemDelayedWork *work;
+
+	g_return_if_fail(work_id >= 0 && work_id < ARRAY_SIZE(priv->delayed_works));
+	g_return_if_fail(func != NULL);
+
+	work = &priv->delayed_works[work_id];
+	work->end_time = g_get_monotonic_time() + timeout_ms * 1000;
+	work->func = func;
+	work->user_data = user_data;
+	work->enabled = TRUE;
+}
+
 void ipcam_isystem_update_network_setting(IpcamISystem *isystem, JsonNode *body)
 {
     JsonObject *items_obj = json_object_get_object_member(json_node_get_object(body), "items");
@@ -91,6 +183,13 @@ void ipcam_isystem_update_network_setting(IpcamISystem *isystem, JsonNode *body)
                 pclose(fp);
             }
         }
+	}
+	if (json_object_has_member(items_obj, "method") ||
+	    json_object_has_member(items_obj, "address"))
+	{
+		ipcam_isystem_sched_delayed_work(isystem, NETWORK_DELAYED_WORK_ID, 3000,
+		                                 ipcam_isystem_apply_network_parameter,
+		                                 isystem);
 	}
 }
 
