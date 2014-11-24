@@ -5,6 +5,8 @@ scripts:
   timezone: '/apps/etc/init.d/S72timezone'
   lighttpd: '/apps/etc/init.d/S81lighttpd restart'
   network:  '/apps/etc/init.d/S80network restart'
+delayed_work:
+  network: 2000
 system_led:
   interval: 1
   address: '0x201C0020'

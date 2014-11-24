@@ -187,7 +187,10 @@ void ipcam_isystem_update_network_setting(IpcamISystem *isystem, JsonNode *body)
 	if (json_object_has_member(items_obj, "method") ||
 	    json_object_has_member(items_obj, "address"))
 	{
-		ipcam_isystem_sched_delayed_work(isystem, NETWORK_DELAYED_WORK_ID, 3000,
+		const gchar *delay_str = ipcam_base_app_get_config(IPCAM_BASE_APP(isystem),
+		                                                   "delayed_work:network");
+		gint64 delay_ms = strtoul(delay_str, NULL, 0);
+		ipcam_isystem_sched_delayed_work(isystem, NETWORK_DELAYED_WORK_ID, delay_ms,
 		                                 ipcam_isystem_apply_network_parameter,
 		                                 isystem);
 	}
