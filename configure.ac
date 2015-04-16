@@ -21,5 +21,6 @@ AC_OUTPUT([
 Makefile
 src/Makefile
 src/config/Makefile
+src/vtoold/Makefile
 
 ])

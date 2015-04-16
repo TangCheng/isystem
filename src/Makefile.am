@@ -29,4 +29,5 @@ isystem_LDADD = $(ISYSTEM_LIBS)
 
 
 SUBDIRS = \
-	config
+	config \
+	vtoold
