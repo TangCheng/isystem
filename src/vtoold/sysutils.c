@@ -38,7 +38,31 @@
 #include <errno.h>
 #include "sysutils.h"
 
-static char *dbname = "/data/configuration.sqlite3";
+#define DATABASE_PATH   "/data/configuration.sqlite3"
+
+int sysutils_device_get(const char *key, char *value, int valuelen)
+{
+    char *cmd;
+    FILE *fp;
+    int ret = -1;
+    char buf[128];
+
+    asprintf(&cmd, "sqlite3 %s "
+             "\"select value from base_info where name='%s'\"",
+             DATABASE_PATH, key);
+    fp = popen(cmd, "r");
+    free(cmd);
+    if (fp) {
+        if (fgets(buf, sizeof(buf), fp) == NULL) {
+            strncpy(value, buf, valuelen);
+            ret = 0;
+        }
+
+        pclose(fp);
+    }
+
+    return ret;
+}
 
 int sysutils_device_set(const char *key, const char *value)
 {
@@ -47,7 +71,7 @@ int sysutils_device_set(const char *key, const char *value)
 
     asprintf(&cmd, "sqlite3 %s "
              "\"update base_info set value='%s' where name='%s'\"",
-             dbname, value, key);
+             DATABASE_PATH, value, key);
     fp = popen(cmd, "r");
     free(cmd);
     if (fp == NULL)
@@ -109,8 +133,7 @@ int sysutils_network_get_hwaddr(const char *ifname, char **hwaddr)
 
 int sysutils_network_get_address(const char *ifname,
                                  char **ipaddr,
-                                 char **netmask,
-                                 char **broadaddr)
+                                 char **netmask)
 {
     char *cmd;
     FILE *fp;
@@ -123,21 +146,18 @@ int sysutils_network_get_address(const char *ifname,
     if (fp) {
         char ip[32];
         guint mask;
-        char brd[32];
 
         /* 
          * Output for example
          * 2: eth0    inet 192.168.10.15/24 brd 192.168.10.255 scope global eth0
          */
-        if (fscanf(fp, "%*d:%*s inet %32[0-9.] %*c %d brd %32[0-9.] %*[^$] %*[$]",
-                   ip, &mask, brd) == 3)
+        if (fscanf(fp, "%*d:%*s inet %32[0-9.] %*c %d brd %*[0-9.] %*[^$] %*[$]",
+                   ip, &mask) == 2)
         {
             if (ipaddr)
                 *ipaddr = strdup(ip);
             if (netmask)
                 *netmask = strdup(__prefixlen2_mask(mask));
-            if (broadaddr)
-                *broadaddr = strdup(brd);
 
             ret = 0;
         }
@@ -149,33 +169,40 @@ int sysutils_network_get_address(const char *ifname,
 
 int sysutils_network_set_address(const char *ifname,
                                  const char *ipaddr,
-                                 const char *netmask,
-                                 const char *broadaddr)
+                                 const char *netmask)
 {
     char *cmd = NULL;
-    char *_brd = NULL;
     char *_mask = NULL;
     FILE *fp;
     int ret = -1;
 
-    if (broadaddr)
-        asprintf(&_brd, "-broadcast %s", broadaddr);
     if (netmask)
         asprintf(&_mask, "netmask %s", netmask);
 
-    asprintf(&cmd, "ifconfig %s %s %s %s", ifname,
+    asprintf(&cmd, "ifconfig %s %s %s", ifname,
              ipaddr ? ipaddr : "",
-             netmask ? _mask : "",
-             broadaddr ? _brd : "");
+             netmask ? _mask : "");
     fp = popen(cmd, "r");
     free(cmd);
-    free(_brd);
     free(_mask);
 
     if (fp) {
         pclose(fp);
+    }
 
-        ret = 0;
+    asprintf(&cmd, "sqlite3 %s \""
+             " update network set value='static' where name='method';"
+             " update network_static set value='%s' where name='ipaddr';"
+             " update network_static set value='%s' where name='netmask';"
+             "\"",
+             DATABASE_PATH,
+             ipaddr,
+             netmask);
+
+    fp = popen(cmd, "r");
+    free(cmd);
+    if (fp) {
+        pclose(fp);
     }
 
     return ret;
@@ -185,6 +212,7 @@ int sysutils_network_get_gateway(const char *ifname, char **gwaddr)
 {
     FILE *fp;
     int ret = -1;
+    char *cmd = NULL;
     char buf[128];
     char gw[32];
 
@@ -192,10 +220,10 @@ int sysutils_network_get_gateway(const char *ifname, char **gwaddr)
     if (fp == NULL)
         return -1;
 
-        /* 
-         * Output for example
-         * default via 192.168.1.1 dev wlp8s0  proto static  metric 1024
-         */
+    /* 
+     * Output for example
+     * default via 192.168.1.1 dev wlp8s0  proto static  metric 1024
+     */
     while(!feof(fp)) {
         if (fgets(buf, sizeof(buf), fp) == NULL)
             continue;
@@ -207,13 +235,40 @@ int sysutils_network_get_gateway(const char *ifname, char **gwaddr)
     }
     pclose(fp);
 
+    /* get gateway from database */
+    if (ret < 0) {
+        asprintf(&cmd, "sqlite3 %s "
+                 "\"select value from network_static where name='gateway'\"",
+                 DATABASE_PATH);
+        fp = popen(cmd, "r");
+        if (fp) {
+            if (fgets(gw, sizeof(gw), fp) != NULL) {
+                *gwaddr = strdup(gw);
+                ret = 0;
+            }
+        }
+    }
+
     return ret;
 }
 
 int sysutils_network_set_gateway(const char *ifname, const char *gwaddr)
 {
-    char *cmd;
+    char *cmd = NULL;
     FILE *fp;
+
+    /* update database */
+    asprintf(&cmd, "sqlite3 %s \"update network_static set value='%s' where name='gateway'\"",
+             DATABASE_PATH,
+             gwaddr);
+    if (cmd) {
+        fp = popen(cmd, "r");
+        free(cmd);
+        if (fp == NULL)
+            return -1;
+
+        pclose(fp);
+    }
 
     /* Delete the route */
     fp = popen("ip route del default", "r");
@@ -231,4 +286,94 @@ int sysutils_network_set_gateway(const char *ifname, const char *gwaddr)
     pclose(fp);
 
     return 0;
+}
+
+int sysutils_get_device_info(const char **device_name,
+                             const char **serial,
+                             const char **manufacturer,
+                             int *device_type)
+{
+    char *cmd = NULL;
+    FILE *fp;
+    int ret = -1;
+
+    asprintf(&cmd, "sqlite3 %s \"select name,value from base_info\"",
+             DATABASE_PATH);
+    fp = popen(cmd, "r");
+    if (fp) {
+        char line[128];
+        char name[64];
+        char value[64];
+
+        while (fgets(line, sizeof(line), fp)) {
+            if (sscanf(line, "%64[^|]|%64[^\n$]", name, value) == 2)
+            {
+                if (!strcmp(name, "device_name") && device_name)
+                    *device_name = strdup(value);
+                else if (!strcmp(name, "serial") && serial)
+                    *serial = strdup(value);
+                else if (!strcmp(name, "manufacturer") && manufacturer)
+                    *manufacturer = strdup(value);
+                else if (!strcmp(name, "device_type") && device_type)
+                    *device_type = strtoul(value, NULL, 0);
+
+            }
+        }
+        pclose(fp);
+
+        ret = 0;
+    }
+
+    return ret;
+}
+
+int sysutils_set_device_info(const char *device_name,
+                             const char *serial,
+                             const char *manufacturer,
+                             int device_type)
+{
+    char *cmd = NULL;
+    char *cmd_devname = "";
+    char *cmd_serial = "";
+    char *cmd_manufacturer = "";
+    char *cmd_device_type = "";
+    FILE *fp;
+    int ret = -1;
+
+    if (device_name)
+        asprintf(&cmd_devname,
+                 "update base_info set value='%s' where name='device_name'",
+                 device_name);
+    if (serial)
+        asprintf(&cmd_serial,
+                 "update base_info set value='%s' where name='serial'",
+                 serial);
+    if (manufacturer)
+        asprintf(&cmd_manufacturer,
+                 "update base_info set value='%s' where name='manufacturer'",
+                 manufacturer);
+    if (device_type)
+        asprintf(&cmd_device_type,
+                 "update base_info set value='%d' where name='device_type'",
+                 device_type);
+    asprintf(&cmd, "sqlite3 %s \""
+             "%s; %s; %s; %s;"
+             DATABASE_PATH,
+             cmd_devname,
+             cmd_serial,
+             cmd_manufacturer,
+             cmd_device_type);
+    free(cmd_devname);
+    free(cmd_serial);
+    free(cmd_manufacturer);
+    free(cmd_device_type);
+    fp = popen(cmd, "r");
+    free(cmd);
+    if (fp) {
+        pclose(fp);
+
+        ret = 0;
+    }
+
+    return ret;
 }

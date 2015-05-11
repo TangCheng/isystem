@@ -26,14 +26,22 @@ int sysutils_network_set_hwaddr(const char *ifname, const char *hwaddr);
 int sysutils_network_get_hwaddr(const char *ifname, char **hwaddr);
 int sysutils_network_get_address(const char *ifname,
                                  char **ipaddr,
-                                 char **netmask,
-                                 char **broadaddr);
+                                 char **netmask);
 int sysutils_network_set_address(const char *ifname,
                                  const char *ipaddr,
-                                 const char *netmask,
-                                 const char *broadaddr);
+                                 const char *netmask);
 int sysutils_network_get_gateway(const char *ifname, char **gwaddr);
 int sysutils_network_set_gateway(const char *ifname, const char *gwaddr);
+#if 0
+int sysutils_get_device_info(const char **device_name,
+                             const char **serial,
+                             const char **manufacturer,
+                             int *device_type);
+int sysutils_set_device_info(const char *device_name,
+                             const char *serial,
+                             const char *manufacturer,
+                             int device_type);
+#endif
 
 #endif // _SYSUTILS_H_
 

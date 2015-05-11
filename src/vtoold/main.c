@@ -17,13 +17,20 @@
 #include <string.h>
 #include <json-glib/json-glib.h>
 
+#define DEBUG	   1
+#ifdef DEBUG
+# define DBG_PRINT(...)	printf(__VA_ARGS__)
+#else
+# define DBG_PRINT(...)
+#endif
+
 #include "sysutils.h"
 
 static char netif[16] = "eth0";
 static int __server_port = 6000;
-static struct sockaddr_in peer_addr;
+static char __hwaddr[32];
 
-static JsonNode *vtool_discovery(JsonNode *request)
+static JsonNode *vtool_discovery(JsonNode *request, struct sockaddr_in *peer)
 {
 	JsonObject *req_obj;
 	JsonBuilder *builder;
@@ -32,26 +39,35 @@ static JsonNode *vtool_discovery(JsonNode *request)
 	char *netmask = NULL;
 	char *gateway = NULL;
 	char *hwaddr = NULL;
+	char *device_name = NULL;
+	char *serial = NULL;
+	char *manufacturer = NULL;
+	guint32 device_type = 0;
+	char *model = NULL;
 
 	req_obj = json_node_get_object(request);
 
 	g_return_val_if_fail(req_obj != NULL, NULL);
 	g_return_val_if_fail(json_object_has_member(req_obj, "msg_num"), NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "tool_ip"), NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "tool_port"), NULL);
 
 	gint64 msg_num = json_object_get_int_member(req_obj, "msg_num");
 
-	if (json_object_has_member(req_obj, "ipaddr")) {
-		const gchar *ip = json_object_get_string_member(req_obj, "ipaddr");
-		inet_aton(ip, &peer_addr.sin_addr);
-	}
-	if (json_object_has_member(req_obj, "port")) {
-		gint64 port = json_object_get_int_member(req_obj, "port");
-		peer_addr.sin_port = htons((int)port);
-	}
 
-	sysutils_network_get_address(netif, &ipaddr, &netmask, NULL);
+	const gchar *tool_ip;
+	gint64 tool_port;
+
+	tool_ip = json_object_get_string_member(req_obj, "tool_ip");
+	inet_aton(tool_ip, &peer->sin_addr);
+	tool_port = json_object_get_int_member(req_obj, "tool_port");
+	peer->sin_port = htons((int)tool_port);
+
+	sysutils_network_get_address(netif, &ipaddr, &netmask);
 	sysutils_network_get_hwaddr(netif, &hwaddr);
 	sysutils_network_get_gateway(netif, &gateway);
+	sysutils_get_device_info(&device_name, &serial, &manufacturer, &device_type);
+
 	builder = json_builder_new();
 
 	json_builder_begin_object(builder);
@@ -59,6 +75,10 @@ static JsonNode *vtool_discovery(JsonNode *request)
 	json_builder_add_int_value(builder, 2);
 	json_builder_set_member_name(builder, "msg_num");
 	json_builder_add_int_value(builder, msg_num);
+	json_builder_set_member_name(builder, "status");
+	json_builder_add_int_value(builder, 0);
+	json_builder_set_member_name(builder, "name");
+	json_builder_add_string_value(builder, device_name);
 	json_builder_set_member_name(builder, "ipaddr");
 	json_builder_add_string_value(builder, ipaddr);
 	json_builder_set_member_name(builder, "netmask");
@@ -69,6 +89,12 @@ static JsonNode *vtool_discovery(JsonNode *request)
 	json_builder_add_string_value(builder, hwaddr);
 	json_builder_set_member_name(builder, "port");
 	json_builder_add_int_value(builder, __server_port);
+	json_builder_set_member_name(builder, "serial");
+	json_builder_add_string_value(builder, serial);
+	json_builder_set_member_name(builder, "manufacturer");
+	json_builder_add_string_value(builder, manufacturer);
+	json_builder_set_member_name(builder, "device_type");
+	json_builder_add_int_value(builder, (gint64)device_type);
 	json_builder_end_object(builder);
 
 	resp_node = json_builder_get_root(builder);
@@ -78,7 +104,7 @@ static JsonNode *vtool_discovery(JsonNode *request)
 	return resp_node;
 }
 
-static JsonNode *vtool_configure(JsonNode *request)
+static JsonNode *vtool_set_hwaddr(JsonNode *request, struct sockaddr_in *peer)
 {
 	JsonObject *req_obj;
 	JsonBuilder *builder;
@@ -88,19 +114,126 @@ static JsonNode *vtool_configure(JsonNode *request)
 
 	g_return_val_if_fail(req_obj != NULL, NULL);
 	g_return_val_if_fail(json_object_has_member(req_obj, "msg_num"), NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "tool_ip"), NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "tool_port"), NULL);
 
 	gint64 msg_num = json_object_get_int_member(req_obj, "msg_num");
+
+	const gchar *tool_ip;
+	gint64 tool_port;
+
+	tool_ip = json_object_get_string_member(req_obj, "tool_ip");
+	inet_aton(tool_ip, &peer->sin_addr);
+	tool_port = json_object_get_int_member(req_obj, "tool_port");
+	peer->sin_port = htons((int)tool_port);
+
+	const gchar *hwaddr = json_object_get_string_member(req_obj, "hwaddr");
+	if (hwaddr) {
+		sysutils_network_set_hwaddr(netif, hwaddr);
+	}
+	strncpy(__hwaddr, hwaddr, sizeof(hwaddr));
+
+	builder = json_builder_new();
+
+	json_builder_begin_object(builder);
+	json_builder_set_member_name(builder, "cmd");
+	json_builder_add_int_value(builder, 4);
+	json_builder_set_member_name(builder, "msg_num");
+	json_builder_add_int_value(builder, msg_num);
+	json_builder_set_member_name(builder, "status");
+	json_builder_add_int_value(builder, 0);
+	json_builder_set_member_name(builder, "hwaddr");
+	json_builder_add_string_value(builder, hwaddr);
+	json_builder_end_object(builder);
+
+	resp_node = json_builder_get_root(builder);
+
+	g_object_unref(builder);
+
+	return resp_node;
+}
+
+static JsonNode *vtool_set_ipaddr(JsonNode *request, struct sockaddr_in *peer)
+{
+	JsonObject *req_obj;
+	JsonBuilder *builder;
+	JsonNode *resp_node;
+
+	req_obj = json_node_get_object(request);
+
+	g_return_val_if_fail(req_obj != NULL, NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "msg_num"), NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "tool_ip"), NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "tool_port"), NULL);
+
+	gint64 msg_num = json_object_get_int_member(req_obj, "msg_num");
+
+	const gchar *tool_ip;
+	gint64 tool_port;
+
+	tool_ip = json_object_get_string_member(req_obj, "tool_ip");
+	inet_aton(tool_ip, &peer->sin_addr);
+	tool_port = json_object_get_int_member(req_obj, "tool_port");
+	peer->sin_port = htons((int)tool_port);
+
+	const gchar *hwaddr = json_object_get_string_member(req_obj, "hwaddr");
+	const gchar *ipaddr = json_object_get_string_member(req_obj, "ipaddr");
+	const gchar *netmask = json_object_get_string_member(req_obj, "netmask");
+	const gchar *gateway = json_object_get_string_member(req_obj, "gateway");
+	if (hwaddr && ipaddr && netmask) {
+		sysutils_network_set_address(netif, ipaddr, netmask);
+	}
+	if (gateway) {
+		sysutils_network_set_gateway(netif, gateway);
+	}
+
+	builder = json_builder_new();
+
+	json_builder_begin_object(builder);
+	json_builder_set_member_name(builder, "cmd");
+	json_builder_add_int_value(builder, 6);
+	json_builder_set_member_name(builder, "msg_num");
+	json_builder_add_int_value(builder, msg_num);
+	json_builder_set_member_name(builder, "status");
+	json_builder_add_int_value(builder, 0);
+	json_builder_set_member_name(builder, "hwaddr");
+	json_builder_add_string_value(builder, __hwaddr);
+	json_builder_end_object(builder);
+
+	resp_node = json_builder_get_root(builder);
+
+	g_object_unref(builder);
+
+	return resp_node;
+}
+
+static JsonNode *vtool_set_device_info(JsonNode *request, struct sockaddr_in *peer)
+{
+	JsonObject *req_obj;
+	JsonBuilder *builder;
+	JsonNode *resp_node;
+
+	req_obj = json_node_get_object(request);
+
+	g_return_val_if_fail(req_obj != NULL, NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "msg_num"), NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "tool_ip"), NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "tool_port"), NULL);
+
+	gint64 msg_num = json_object_get_int_member(req_obj, "msg_num");
+
+	const gchar *tool_ip;
+	gint64 tool_port;
+
+	tool_ip = json_object_get_string_member(req_obj, "tool_ip");
+	inet_aton(tool_ip, &peer->sin_addr);
+	tool_port = json_object_get_int_member(req_obj, "tool_port");
+	peer->sin_port = htons((int)tool_port);
 
 	if (json_object_has_member(req_obj, "name")) {
 		const gchar *devname = json_object_get_string_member(req_obj, "name");
 		if (devname) {
 			sysutils_device_set("device_name", devname);
-		}
-	}
-	if (json_object_has_member(req_obj, "hwaddr")) {
-		const gchar *hwaddr = json_object_get_string_member(req_obj, "hwaddr");
-		if (hwaddr) {
-			sysutils_network_set_hwaddr(netif, hwaddr);
 		}
 	}
 	if (json_object_has_member(req_obj, "serial")) {
@@ -116,10 +249,11 @@ static JsonNode *vtool_configure(JsonNode *request)
 		}
 	}
 	if (json_object_has_member(req_obj, "device_type")) {
-		const gchar *device_type = json_object_get_string_member(req_obj, "device_type");
-		if (device_type) {
-			sysutils_device_set("device_type", device_type);
-		}
+		int device_type = json_object_get_int_member(req_obj, "device_type");
+		char str[16];
+
+		snprintf(str, sizeof(str), "%d", device_type);
+		sysutils_device_set("device_type", str);
 	}
 	if (json_object_has_member(req_obj, "model")) {
 		const gchar *model = json_object_get_string_member(req_obj, "model");
@@ -132,11 +266,13 @@ static JsonNode *vtool_configure(JsonNode *request)
 
 	json_builder_begin_object(builder);
 	json_builder_set_member_name(builder, "cmd");
-	json_builder_add_int_value(builder, 4);
+	json_builder_add_int_value(builder, 22);
 	json_builder_set_member_name(builder, "msg_num");
 	json_builder_add_int_value(builder, msg_num);
 	json_builder_set_member_name(builder, "status");
 	json_builder_add_int_value(builder, 0);
+	json_builder_set_member_name(builder, "hwaddr");
+	json_builder_add_string_value(builder, __hwaddr);
 	json_builder_end_object(builder);
 
 	resp_node = json_builder_get_root(builder);
@@ -150,6 +286,13 @@ static void vtool_process_request(int sockfd, struct sockaddr_in *addr,
                                   const char *req_buf, size_t buf_size)
 {
 	JsonParser *parser = json_parser_new();
+	struct sockaddr_in peer;
+
+	bzero(&peer, sizeof(peer));
+	peer.sin_family = AF_INET;
+	peer.sin_addr.s_addr = htonl(INADDR_ANY);
+	peer.sin_port = htons(__server_port + 1);
+
 	if (json_parser_load_from_data(parser, req_buf, buf_size, NULL)) {
 		JsonNode *root_node = json_parser_get_root(parser);
 		JsonObject *root_obj = json_node_get_object(root_node);
@@ -159,10 +302,16 @@ static void vtool_process_request(int sockfd, struct sockaddr_in *addr,
 
 			switch((int)cmd) {
 			case 1:
-				response = vtool_discovery(root_node);
+				response = vtool_discovery(root_node, &peer);
 				break;
 			case 3:
-				response = vtool_configure(root_node);
+				response = vtool_set_hwaddr(root_node, &peer);
+				break;
+			case 5:
+				response = vtool_set_ipaddr(root_node, &peer);
+				break;
+			case 21:
+				response = vtool_set_device_info(root_node, &peer);
 				break;
 			default:
 				break;
@@ -173,12 +322,23 @@ static void vtool_process_request(int sockfd, struct sockaddr_in *addr,
 			gsize text_length = 0;
 			JsonGenerator *generator = json_generator_new();
 			json_generator_set_root(generator, response);
+			json_generator_set_pretty(generator, TRUE);
 
 			gchar *text = json_generator_to_data(generator, &text_length);
 
+			DBG_PRINT("%s ==> [%s:%d]\n",
+					  text,
+					  inet_ntoa(peer.sin_addr),
+					  ntohs(peer.sin_port));
+
 			if (text && text_length > 0) {
-				sendto(sockfd, text, text_length, MSG_DONTROUTE,
-				       (struct sockaddr*)&peer_addr, sizeof(peer_addr));
+				int ret;
+
+				ret = sendto(sockfd, text, text_length, 0,
+							 (struct sockaddr*)&peer, sizeof(peer));
+				if (ret < 0) {
+					perror("sendto failed:");
+				}
 
 				g_free(text);
 			}
@@ -219,7 +379,12 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	bzero(&peer_addr, sizeof(peer_addr));
+	char *hwaddr = NULL;
+	if (sysutils_network_get_hwaddr(netif, &hwaddr) < 0) {
+		perror("Cannot get hwaddr\n");
+		return -1;
+	}
+	strncpy(__hwaddr, hwaddr, sizeof(__hwaddr));
 
 	bzero(&addr_rcv, sizeof(addr_rcv));
 	addr_rcv.sin_family = AF_INET;
@@ -259,7 +424,11 @@ int main(int argc, char *argv[])
 		}
 
 		req_buf[ret] = 0;
-		printf("recv request msg : %s\n", req_buf);
+
+		DBG_PRINT("\n%s <== [%s:%d]\n",
+				  req_buf,
+				  inet_ntoa(addr_from.sin_addr),
+				  ntohs(addr_from.sin_port));
 
 		vtool_process_request(sockfd, &addr_from, req_buf, ret);
 	}
