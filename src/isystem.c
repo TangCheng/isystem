@@ -198,6 +198,7 @@ void ipcam_isystem_update_network_setting(IpcamISystem *isystem, JsonNode *body)
 
 void ipcam_isystem_update_datetime_setting(IpcamISystem *isystem, JsonNode *body)
 {
+#if 0
     JsonObject *items_obj = json_object_get_object_member(json_node_get_object(body), "items");
     const gchar *time_script = ipcam_base_app_get_config(IPCAM_BASE_APP(isystem), "scripts:timezone");
 
@@ -216,4 +217,5 @@ void ipcam_isystem_update_datetime_setting(IpcamISystem *isystem, JsonNode *body
             pclose(fp);
         }
 	}
+#endif
 }
