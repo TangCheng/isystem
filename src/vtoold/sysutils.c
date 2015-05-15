@@ -40,12 +40,14 @@
 
 #define DATABASE_PATH   "/data/configuration.sqlite3"
 
-int sysutils_device_get(const char *key, char *value, int valuelen)
+int sysutils_device_get(const char *key, char **value)
 {
     char *cmd;
     FILE *fp;
     int ret = -1;
     char buf[128];
+
+    g_return_val_if_fail(value != NULL, -1);
 
     asprintf(&cmd, "sqlite3 %s "
              "\"select value from base_info where name='%s'\"",
@@ -53,8 +55,9 @@ int sysutils_device_get(const char *key, char *value, int valuelen)
     fp = popen(cmd, "r");
     free(cmd);
     if (fp) {
-        if (fgets(buf, sizeof(buf), fp) == NULL) {
-            strncpy(value, buf, valuelen);
+        if (fscanf(fp, "%s", buf) == 1) {
+            *value = strdup(buf);
+
             ret = 0;
         }
 
@@ -70,8 +73,9 @@ int sysutils_device_set(const char *key, const char *value)
     FILE *fp;
 
     asprintf(&cmd, "sqlite3 %s "
-             "\"update base_info set value='%s' where name='%s'\"",
-             DATABASE_PATH, value, key);
+             "\"replace into base_info(name,value,rw)"
+             "values ('%s','%s',0)\"",
+             DATABASE_PATH, key, value);
     fp = popen(cmd, "r");
     free(cmd);
     if (fp == NULL)
@@ -286,94 +290,4 @@ int sysutils_network_set_gateway(const char *ifname, const char *gwaddr)
     pclose(fp);
 
     return 0;
-}
-
-int sysutils_get_device_info(const char **device_name,
-                             const char **serial,
-                             const char **manufacturer,
-                             int *device_type)
-{
-    char *cmd = NULL;
-    FILE *fp;
-    int ret = -1;
-
-    asprintf(&cmd, "sqlite3 %s \"select name,value from base_info\"",
-             DATABASE_PATH);
-    fp = popen(cmd, "r");
-    if (fp) {
-        char line[128];
-        char name[64];
-        char value[64];
-
-        while (fgets(line, sizeof(line), fp)) {
-            if (sscanf(line, "%64[^|]|%64[^\n$]", name, value) == 2)
-            {
-                if (!strcmp(name, "device_name") && device_name)
-                    *device_name = strdup(value);
-                else if (!strcmp(name, "serial") && serial)
-                    *serial = strdup(value);
-                else if (!strcmp(name, "manufacturer") && manufacturer)
-                    *manufacturer = strdup(value);
-                else if (!strcmp(name, "device_type") && device_type)
-                    *device_type = strtoul(value, NULL, 0);
-
-            }
-        }
-        pclose(fp);
-
-        ret = 0;
-    }
-
-    return ret;
-}
-
-int sysutils_set_device_info(const char *device_name,
-                             const char *serial,
-                             const char *manufacturer,
-                             int device_type)
-{
-    char *cmd = NULL;
-    char *cmd_devname = "";
-    char *cmd_serial = "";
-    char *cmd_manufacturer = "";
-    char *cmd_device_type = "";
-    FILE *fp;
-    int ret = -1;
-
-    if (device_name)
-        asprintf(&cmd_devname,
-                 "update base_info set value='%s' where name='device_name'",
-                 device_name);
-    if (serial)
-        asprintf(&cmd_serial,
-                 "update base_info set value='%s' where name='serial'",
-                 serial);
-    if (manufacturer)
-        asprintf(&cmd_manufacturer,
-                 "update base_info set value='%s' where name='manufacturer'",
-                 manufacturer);
-    if (device_type)
-        asprintf(&cmd_device_type,
-                 "update base_info set value='%d' where name='device_type'",
-                 device_type);
-    asprintf(&cmd, "sqlite3 %s \""
-             "%s; %s; %s; %s;"
-             DATABASE_PATH,
-             cmd_devname,
-             cmd_serial,
-             cmd_manufacturer,
-             cmd_device_type);
-    free(cmd_devname);
-    free(cmd_serial);
-    free(cmd_manufacturer);
-    free(cmd_device_type);
-    fp = popen(cmd, "r");
-    free(cmd);
-    if (fp) {
-        pclose(fp);
-
-        ret = 0;
-    }
-
-    return ret;
 }

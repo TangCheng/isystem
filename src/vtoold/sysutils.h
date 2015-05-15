@@ -32,16 +32,6 @@ int sysutils_network_set_address(const char *ifname,
                                  const char *netmask);
 int sysutils_network_get_gateway(const char *ifname, char **gwaddr);
 int sysutils_network_set_gateway(const char *ifname, const char *gwaddr);
-#if 0
-int sysutils_get_device_info(const char **device_name,
-                             const char **serial,
-                             const char **manufacturer,
-                             int *device_type);
-int sysutils_set_device_info(const char *device_name,
-                             const char *serial,
-                             const char *manufacturer,
-                             int device_type);
-#endif
 
 #endif // _SYSUTILS_H_
 

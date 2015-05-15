@@ -42,7 +42,7 @@ static JsonNode *vtool_discovery(JsonNode *request, struct sockaddr_in *peer)
 	char *device_name = NULL;
 	char *serial = NULL;
 	char *manufacturer = NULL;
-	guint32 device_type = 0;
+	char *device_type = NULL;
 	char *model = NULL;
 
 	req_obj = json_node_get_object(request);
@@ -66,7 +66,11 @@ static JsonNode *vtool_discovery(JsonNode *request, struct sockaddr_in *peer)
 	sysutils_network_get_address(netif, &ipaddr, &netmask);
 	sysutils_network_get_hwaddr(netif, &hwaddr);
 	sysutils_network_get_gateway(netif, &gateway);
-	sysutils_get_device_info(&device_name, &serial, &manufacturer, &device_type);
+	sysutils_device_get("device_name", &device_name);
+	sysutils_device_get("serial", &serial);
+	sysutils_device_get("manufacturer", &manufacturer);
+	sysutils_device_get("device_type", &device_type);
+	
 
 	builder = json_builder_new();
 
@@ -94,12 +98,25 @@ static JsonNode *vtool_discovery(JsonNode *request, struct sockaddr_in *peer)
 	json_builder_set_member_name(builder, "manufacturer");
 	json_builder_add_string_value(builder, manufacturer);
 	json_builder_set_member_name(builder, "device_type");
-	json_builder_add_int_value(builder, (gint64)device_type);
+	gint64 dt = 0;
+	if (device_type)
+		dt = strtoul(device_type, NULL, 0);
+	json_builder_add_int_value(builder, dt);
 	json_builder_end_object(builder);
 
 	resp_node = json_builder_get_root(builder);
 
 	g_object_unref(builder);
+
+	free(ipaddr);
+	free(netmask);
+	free(gateway);
+	free(hwaddr);
+	free(device_name);
+	free(serial);
+	free(manufacturer);
+	free(device_type);
+	free(model);
 
 	return resp_node;
 }
