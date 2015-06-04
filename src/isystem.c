@@ -198,24 +198,22 @@ void ipcam_isystem_update_network_setting(IpcamISystem *isystem, JsonNode *body)
 
 void ipcam_isystem_update_datetime_setting(IpcamISystem *isystem, JsonNode *body)
 {
-#if 0
-    JsonObject *items_obj = json_object_get_object_member(json_node_get_object(body), "items");
-    const gchar *time_script = ipcam_base_app_get_config(IPCAM_BASE_APP(isystem), "scripts:timezone");
+	const gchar *script;
 
-    if (NULL != time_script &&
-        json_object_has_member(items_obj, "timezone"))
-    {
+	script = ipcam_base_app_get_config(IPCAM_BASE_APP(isystem), "scripts:ntpd");
+	if (script) {
 		FILE *fp;
 
-        fp = popen(time_script, "w");
-        if (fp == NULL)
-        {
-            perror("error set timezone!");
-        }
-        else
-        {
-            pclose(fp);
-        }
+		fp = popen(script, "w");
+		if (fp == NULL)
+		{
+			perror("error exec ntpd script:");
+		}
+		else
+		{
+			pclose(fp);
+		}
 	}
-#endif
+
+	return 0;
 }

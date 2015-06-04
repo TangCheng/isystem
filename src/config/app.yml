@@ -3,6 +3,7 @@ subscribe:
   iconfig_pub: tcp://127.0.0.1:65401
 scripts:
   timezone: '/apps/etc/init.d/S72timezone'
+  ntpd:     '/apps/etc/init.d/S82ntp reload'
   lighttpd: '/apps/etc/init.d/S81lighttpd restart'
   network:  '/apps/etc/init.d/S80network restart'
 delayed_work:
