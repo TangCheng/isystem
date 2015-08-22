@@ -20,6 +20,8 @@
 #ifndef _SYSUTILS_H_
 #define _SYSUTILS_H_
 
+int sysutils_reset_system(const char *action);
+
 int sysutils_device_set(const char *key, const char *value);
 
 int sysutils_network_set_hwaddr(const char *ifname, const char *hwaddr);

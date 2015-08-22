@@ -40,6 +40,28 @@
 
 #define DATABASE_PATH   "/data/configuration.sqlite3"
 
+int sysutils_reset_system(const char *action)
+{
+    char *cmd = NULL;
+    FILE *fp;
+
+    if (strcasecmp(action, "hard-reset") == 0)
+        cmd = "/apps/iconfig/hard-reset.sh";
+    else if (strcasecmp(action, "soft-reset") == 0)
+        cmd = "/apps/iconfig/soft-reset.sh";
+    else if (strcasecmp(action, "reboot") == 0)
+        cmd = "reboot";
+
+    if (cmd) {
+        fp = popen(cmd, "r");
+        if (fp) {
+            fclose(fp);
+        }
+    }
+
+    return 0;
+}
+
 int sysutils_device_get(const char *key, char **value)
 {
     char *cmd;

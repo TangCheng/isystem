@@ -67,6 +67,7 @@ static JsonNode *vtool_discovery(JsonNode *request, struct sockaddr_in *peer)
 	sysutils_network_get_hwaddr(netif, &hwaddr);
 	sysutils_network_get_gateway(netif, &gateway);
 	sysutils_device_get("device_name", &device_name);
+	sysutils_device_get("model", &model);
 	sysutils_device_get("serial", &serial);
 	sysutils_device_get("manufacturer", &manufacturer);
 	sysutils_device_get("device_type", &device_type);
@@ -83,6 +84,8 @@ static JsonNode *vtool_discovery(JsonNode *request, struct sockaddr_in *peer)
 	json_builder_add_int_value(builder, 0);
 	json_builder_set_member_name(builder, "name");
 	json_builder_add_string_value(builder, device_name);
+	json_builder_set_member_name(builder, "model");
+	json_builder_add_string_value(builder, model);
 	json_builder_set_member_name(builder, "ipaddr");
 	json_builder_add_string_value(builder, ipaddr);
 	json_builder_set_member_name(builder, "netmask");
@@ -160,7 +163,7 @@ static JsonNode *vtool_set_hwaddr(JsonNode *request, struct sockaddr_in *peer)
 	json_builder_set_member_name(builder, "status");
 	json_builder_add_int_value(builder, 0);
 	json_builder_set_member_name(builder, "hwaddr");
-	json_builder_add_string_value(builder, hwaddr);
+	json_builder_add_string_value(builder, __hwaddr);
 	json_builder_end_object(builder);
 
 	resp_node = json_builder_get_root(builder);
@@ -209,6 +212,54 @@ static JsonNode *vtool_set_ipaddr(JsonNode *request, struct sockaddr_in *peer)
 	json_builder_begin_object(builder);
 	json_builder_set_member_name(builder, "cmd");
 	json_builder_add_int_value(builder, 6);
+	json_builder_set_member_name(builder, "msg_num");
+	json_builder_add_int_value(builder, msg_num);
+	json_builder_set_member_name(builder, "status");
+	json_builder_add_int_value(builder, 0);
+	json_builder_set_member_name(builder, "hwaddr");
+	json_builder_add_string_value(builder, __hwaddr);
+	json_builder_end_object(builder);
+
+	resp_node = json_builder_get_root(builder);
+
+	g_object_unref(builder);
+
+	return resp_node;
+}
+
+static JsonNode *vtool_system_reset(JsonNode *request, struct sockaddr_in *peer)
+{
+	JsonObject *req_obj;
+	JsonBuilder *builder;
+	JsonNode *resp_node;
+
+	req_obj = json_node_get_object(request);
+
+	g_return_val_if_fail(req_obj != NULL, NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "msg_num"), NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "tool_ip"), NULL);
+	g_return_val_if_fail(json_object_has_member(req_obj, "tool_port"), NULL);
+
+	gint64 msg_num = json_object_get_int_member(req_obj, "msg_num");
+
+	const gchar *tool_ip;
+	gint64 tool_port;
+
+	tool_ip = json_object_get_string_member(req_obj, "tool_ip");
+	inet_aton(tool_ip, &peer->sin_addr);
+	tool_port = json_object_get_int_member(req_obj, "tool_port");
+	peer->sin_port = htons((int)tool_port);
+
+	const gchar *action = json_object_get_string_member(req_obj, "action");
+	if (action) {
+		sysutils_reset_system(action);
+	}
+
+	builder = json_builder_new();
+
+	json_builder_begin_object(builder);
+	json_builder_set_member_name(builder, "cmd");
+	json_builder_add_int_value(builder, 12);
 	json_builder_set_member_name(builder, "msg_num");
 	json_builder_add_int_value(builder, msg_num);
 	json_builder_set_member_name(builder, "status");
@@ -307,7 +358,7 @@ static void vtool_process_request(int sockfd, struct sockaddr_in *addr,
 
 	bzero(&peer, sizeof(peer));
 	peer.sin_family = AF_INET;
-	peer.sin_addr.s_addr = htonl(INADDR_ANY);
+	peer.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 	peer.sin_port = htons(__server_port + 1);
 
 	if (json_parser_load_from_data(parser, req_buf, buf_size, NULL)) {
@@ -327,6 +378,9 @@ static void vtool_process_request(int sockfd, struct sockaddr_in *addr,
 			case 5:
 				response = vtool_set_ipaddr(root_node, &peer);
 				break;
+			case 11:
+				response = vtool_system_reset(root_node, &peer);
+				break;
 			case 21:
 				response = vtool_set_device_info(root_node, &peer);
 				break;
@@ -342,6 +396,9 @@ static void vtool_process_request(int sockfd, struct sockaddr_in *addr,
 			json_generator_set_pretty(generator, TRUE);
 
 			gchar *text = json_generator_to_data(generator, &text_length);
+
+			/* Reply all to broadcast address */
+			peer.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 
 			DBG_PRINT("%s ==> [%s:%d]\n",
 					  text,
